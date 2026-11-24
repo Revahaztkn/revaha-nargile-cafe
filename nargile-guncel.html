@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Revaha Nargile Cafe</title>
+<style>
+:root{color-scheme:dark;--cream:#ffe7b8;--muted:#e0bfa5;--panel:#21141ef2}
+*{box-sizing:border-box}
+body{margin:0;background:#100b19;color:var(--cream);font:1rem system-ui,sans-serif}
+main{position:relative;height:100vh;height:100dvh;overflow:hidden;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:14px;padding:clamp(12px,3vw,32px);isolation:isolate;background:radial-gradient(ellipse at 55% 70%,#542647 0,transparent 65%),linear-gradient(150deg,#1c0f26,#101525)}
+video,canvas{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center;z-index:-1}
+main:has(video:not([hidden])){background:#000}
+video{inset:5%;width:90%;height:90%;object-fit:contain;transform:scaleX(-1);filter:brightness(.84)}
+canvas{pointer-events:none}
+header,footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;align-items:center}
+h1{font:700 clamp(2rem,6vw,4rem)/1 Georgia,serif;margin:0}
+.controls{background:var(--panel);border:1px solid #d4926855;border-radius:16px;padding:12px 15px}
+.stage{display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;touch-action:none;min-width:0}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+button,select{font:inherit;color:inherit;background:#372239;border:1px solid #a4757d;border-radius:9px;padding:8px 10px;cursor:pointer}
+button:focus-visible,select:focus-visible{outline:3px solid #ffc477;outline-offset:2px}
+button[aria-pressed=true]{background:#593650}
+#pull{background:#ffd28c;color:#241325;font-weight:750;touch-action:none;user-select:none}
+progress{width:100px;accent-color:#ffc477}
+@media(max-width:560px){.controls{width:100%}}
+</style>
+</head>
+<body>
+<main>
+<video autoplay playsinline muted hidden></video>
+<canvas aria-hidden="true"></canvas>
+<header><h1>Revaha Nargile Cafe</h1></header>
+<div class="stage"></div>
+<footer>
+  <div class="controls">
+    <button id="pull" type="button">Basılı tut</button>
+    <progress id="fill" max="1" value="0" aria-label="Şişenin doluluk oranı"></progress>
+    <label>Aroma <select id="flavor"></select></label>
+    <button id="camera" type="button" aria-pressed="false">Kamera</button>
+  </div>
+</footer>
+</main>
+<script>
+const $ = selector => document.querySelector(selector);
+const canvas = $('canvas'), ctx = canvas.getContext('2d');
+const video = $('video'), stage = $('.stage'), pull = $('#pull');
+const aroma = $('#flavor'), meter = $('#fill');
+const flavors = {
+  Classic: '255,226,194',
+  'Çift Elma': '255,122,126',
+  Nane: '143,255,213',
+  'Lastik Yanığı': '159,151,178',
+  'Kuru Üzüm': '218,164,255',
+  'Vergi Borcu': '255,198,95'
+};
+for (const name of Object.keys(flavors)) aroma.add(new Option(name));
+let active = null, started = 0, releaseUntil = 0, nextPuff = 0;
+let tipX = .62, tipY = .55, width, height, frame = 0;
+const particles = [];
+const duration = 2600;
+
+function position(event) {
+  const bounds = canvas.getBoundingClientRect();
+  tipX = Math.min(.94, Math.max(.05, (event.clientX - bounds.left) / bounds.width));
+  tipY = Math.min(.85, Math.max(.12, (event.clientY - bounds.top) / bounds.height));
+}
+function begin(input) {
+  if (active !== null) return false;
+  active = input;
+  started = performance.now();
+  releaseUntil = 0;
+  pull.textContent = 'Bırakınca üfle';
+  return true;
+}
+function plume(amount, ring = false) {
+  const color = flavors[aroma.value];
+  const x = mouth ? mouth.x * width : tipX * width + 24;
+  const y = mouth ? mouth.y * height : tipY * height - 13;
+  for (let i = 0; i < amount; ++i) {
+    particles.push({x,y,color,ring:false, radius:18 + Math.random()*31, phase:Math.random()*Math.PI*2, age:0,
+      vx:(Math.random()-.5)*210, vy:-22-Math.random()*104, life:2.7+Math.random()*1.65});
+  }
+  if (ring) particles.push({x,y,color,ring:true,radius:12,vx:20,vy:-69,life:2.1, phase:0, age:0});
+  if (particles.length > 940) particles.splice(0, particles.length - 940);
+}
+function finish(input, cancelled = false) {
+  if (active === null || active !== input) return;
+  const now = performance.now(), elapsed = now - started;
+  active = null;
+  pull.textContent = 'Basılı tut';
+  meter.value = 0;
+  if (cancelled || elapsed < 250) return;
+  const amount = Math.min(1, elapsed / duration);
+  const ring = amount >= .8;
+  updateMouth(now);
+  plume(80 + Math.round(amount * 68), ring);
+  releaseUntil = now + 2450 + amount * 1950;
+  nextPuff = now + 65;
+}
+
+for (const target of [stage, pull]) {
+  target.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || !begin(event.pointerId)) return;
+    if (target === stage) position(event);
+    target.setPointerCapture(event.pointerId);
+  });
+  target.addEventListener('pointermove', event => {
+    if (target === stage && (active === event.pointerId || (active === null && event.pointerType === 'mouse'))) position(event);
+  });
+  target.addEventListener('pointerup', event => finish(event.pointerId));
+  target.addEventListener('pointercancel', event => finish(event.pointerId, true));
+  target.addEventListener('lostpointercapture', event => finish(event.pointerId, true));
+}
+addEventListener('keydown', event => {
+  if (!['Space', 'Enter'].includes(event.code) || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (event.target !== pull && (event.code === 'Enter' || event.target.closest('button, select, input, textarea, a, [contenteditable]'))) return;
+  event.preventDefault();
+  if (!event.repeat) begin(event.code);
+});
+addEventListener('keyup', event => {
+  if (event.code === active) {
+    event.preventDefault();
+    finish(event.code);
+  }
+});
+addEventListener('blur', () => finish(active, true));
+
+const camera = $('#camera');
+let stream = null, tracker = null, trackerLoading = null;
+let mouth = null, lastVideoTime = -1, lastDetection = -Infinity;
+const visionPackage = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21';
+const model = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+
+async function loadTracker() {
+  if (tracker) return;
+  trackerLoading ??= (async () => {
+    const {FaceLandmarker, FilesetResolver} = await import(visionPackage + '/vision_bundle.mjs');
+    const files = await FilesetResolver.forVisionTasks(visionPackage + '/wasm');
+    tracker = await FaceLandmarker.createFromOptions(files, {
+      baseOptions: {modelAssetPath: model},
+      runningMode: 'VIDEO',
+      numFaces: 1
+    });
+  })();
+  try { await trackerLoading; }
+  finally { trackerLoading = null; }
+}
+
+function stopCamera() {
+  stream?.getTracks().forEach(track => track.stop());
+  stream = null;
+  video.srcObject = null;
+  video.hidden = true;
+  mouth = null;
+  lastVideoTime = -1;
+  lastDetection = -Infinity;
+  camera.setAttribute('aria-pressed', 'false');
+  camera.textContent = 'Kamera';
+}
+
+camera.addEventListener('click', async () => {
+  if (stream) { stopCamera(); return; }
+  camera.disabled = true;
+  camera.textContent = 'Kamera açılıyor…';
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({video:{width:{ideal:1920},height:{ideal:1080},facingMode:'user'}, audio:false});
+    video.srcObject = stream;
+    video.hidden = false;
+    await video.play();
+    camera.setAttribute('aria-pressed', 'true');
+    camera.textContent = 'Kamerayı kapat';
+    const currentStream = stream;
+    currentStream.getVideoTracks()[0].addEventListener('ended', () => {
+      if (stream === currentStream) stopCamera();
+    });
+    void loadTracker().catch(() => {
+      if (stream === currentStream) {
+        camera.textContent = 'Kamerayı kapat';
+        camera.title = 'Ağız takibi yüklenemedi.';
+      }
+    });
+    camera.title = '';
+  } catch {
+    stopCamera();
+    camera.textContent = 'Kamerayı tekrar dene';
+  } finally {
+    camera.disabled = false;
+  }
+});
+
+function mouthPosition(landmarks, videoWidth, videoHeight, canvasWidth, canvasHeight) {
+  const upperLip = landmarks[13], lowerLip = landmarks[14];
+  const x = (upperLip.x + lowerLip.x) / 2;
+  const y = (upperLip.y + lowerLip.y) / 2;
+  const videoBounds = video.getBoundingClientRect();
+  const scale = Math.min(videoBounds.width / videoWidth, videoBounds.height / videoHeight);
+  return {
+    x: .5 + (.5 - x) * videoWidth * scale / canvasWidth,
+    y: .5 + (y - .5) * videoHeight * scale / canvasHeight
+  };
+}
+
+function updateMouth(now) {
+  if (!stream || !tracker || video.readyState < 2 || !width || !height) return;
+  if (now - lastDetection < 48 || video.currentTime === lastVideoTime) return;
+  lastDetection = now;
+  lastVideoTime = video.currentTime;
+  try {
+    const landmarks = tracker.detectForVideo(video, now).faceLandmarks[0];
+    if (!landmarks) { mouth = null; return; }
+    const point = mouthPosition(landmarks, video.videoWidth, video.videoHeight, width, height);
+    mouth = mouth ? {x:mouth.x + (point.x-mouth.x)*.65, y:mouth.y + (point.y-mouth.y)*.65} : point;
+  } catch {
+    mouth = null;
+  }
+}
+
+function resize() {
+  const bounds = canvas.getBoundingClientRect();
+  width = bounds.width;
+  height = bounds.height;
+  const ratio = Math.min(2, window.devicePixelRatio || 1);
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  ctx.setTransform(ratio,0,0,ratio,0,0);
+}
+new ResizeObserver(resize).observe(canvas);
+resize();
+
+function ellipse(x,y,rx,ry,color) {
+  ctx.beginPath();
+  ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+function metal(left, right) {
+  const finish = ctx.createLinearGradient(left,0,right,0);
+  finish.addColorStop(0,'#392c25');
+  finish.addColorStop(.26,'#977650');
+  finish.addColorStop(.47,'#f7dfae');
+  finish.addColorStop(.66,'#af8d60');
+  finish.addColorStop(1,'#473226');
+  return finish;
+}
+
+function drawHookah(amount) {
+  const playArea = stage.getBoundingClientRect(), bounds = canvas.getBoundingClientRect();
+  const x = width * (width < 560 ? .23 : .17);
+  const y = playArea.bottom - bounds.top - 12;
+  const size = Math.min(1.55,width/350,Math.max(.2,playArea.height/232));
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.scale(size,size);
+  const tx = (tipX*width-x)/size, ty = (tipY*height-y)/size;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(15,-99);
+  ctx.bezierCurveTo(97,-91,53,45,143,19);
+  ctx.bezierCurveTo(210,0,tx-90,ty+105,tx,ty);
+  ctx.strokeStyle = '#170e13';
+  ctx.lineWidth = 12;
+  ctx.stroke();
+  ctx.strokeStyle = '#66504a';
+  ctx.lineWidth = 6;
+  ctx.stroke();
+  ctx.setLineDash([1,5]);
+  ctx.strokeStyle = '#ab8d78';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.save();
+  ctx.translate(tx,ty);
+  ctx.rotate(-.5);
+  ctx.fillStyle = metal(0,34);
+  ctx.beginPath();
+  ctx.roundRect(0,-5,34,10,3);
+  ctx.fill();
+  ctx.fillStyle = '#443530';
+  ctx.fillRect(5,-5,5,10);
+  ctx.restore();
+
+  ellipse(0,3,63,10,'#08060985');
+  const vase = new Path2D();
+  vase.moveTo(-15,-89);
+  vase.bezierCurveTo(-15,-64,-23,-56,-43,-41);
+  vase.bezierCurveTo(-66,-20,-55,-2,-40,0);
+  vase.quadraticCurveTo(0,7,40,0);
+  vase.bezierCurveTo(55,-2,66,-20,43,-41);
+  vase.bezierCurveTo(23,-56,15,-64,15,-89);
+  vase.closePath();
+  const glass = ctx.createLinearGradient(-55,-15,55,-45);
+  glass.addColorStop(0,'#182f31');
+  glass.addColorStop(.23,'#82aaa6');
+  glass.addColorStop(.39,'#355960');
+  glass.addColorStop(.7,'#19363d');
+  glass.addColorStop(.91,'#608987');
+  glass.addColorStop(1,'#222f33');
+  ctx.fillStyle = glass;
+  ctx.fill(vase);
+  ctx.save();
+  ctx.clip(vase);
+  const water = ctx.createLinearGradient(0,-39,0,0);
+  water.addColorStop(0,'rgba('+flavors[aroma.value]+','+(.16+amount*.34)+')');
+  water.addColorStop(1,'#101f26b0');
+  ctx.fillStyle = water;
+  ctx.fillRect(-62,-38,124,44);
+  ellipse(0,-38,51,6,'#b9e0da47');
+  ctx.strokeStyle = '#d1ffec8a';
+  ctx.lineWidth = 1.5;
+  for (const side of [-1,1]) {
+    ctx.beginPath();
+    ctx.moveTo(side*11,-81);
+    ctx.bezierCurveTo(side*10,-56,side*49,-41,side*45,-13);
+    ctx.stroke();
+  }
+  if (amount > 0) {
+    for (let i = 0; i < 8; ++i) {
+      const r = 1.3+i%3*.65;
+      ellipse(Math.sin(i*3+frame*.002)*23,-7-(frame*.03+i*6)%30,r,r,'rgba(241,255,251,'+amount*.55+')');
+    }
+  }
+  ctx.restore();
+  ctx.strokeStyle = '#b1d8ce8c';
+  ctx.stroke(vase);
+
+  ctx.fillStyle = metal(-19,19);
+  ctx.fillRect(-18,-98,36,12);
+  ctx.fillStyle = metal(-7,7);
+  ctx.fillRect(-7,-211,14,117);
+  for (const [at,r] of [[-101,20],[-111,13],[-130,10],[-151,10],[-171,9],[-195,13]]) {
+    ellipse(0,at,r,4,metal(-r,r));
+  }
+  ellipse(0,-184,49,8,metal(-49,49));
+  ellipse(0,-187,47,5,'#ad8c62');
+  ellipse(0,-188,40,2.6,'#594738');
+
+  const ceramic = ctx.createLinearGradient(-26,0,26,0);
+  ceramic.addColorStop(0,'#35201b');
+  ceramic.addColorStop(.42,'#a46d4d');
+  ceramic.addColorStop(1,'#402620');
+  ctx.beginPath();
+  ctx.moveTo(-26,-222);
+  ctx.quadraticCurveTo(-22,-209,-9,-201);
+  ctx.lineTo(9,-201);
+  ctx.quadraticCurveTo(22,-209,26,-222);
+  ctx.closePath();
+  ctx.fillStyle = ceramic;
+  ctx.fill();
+  ellipse(0,-222,26,5,'#a8a2a0');
+  ellipse(0,-223,23,3,'#534843');
+  for (const [coalX,coalY] of [[-14,-225],[0,-230],[13,-225]]) {
+    ctx.fillStyle = '#30272a';
+    ctx.fillRect(coalX-5,coalY-5,10,7);
+    ellipse(coalX,coalY+2,5,1.4,'#d76840');
+  }
+  ctx.restore();
+}
+function animate(now) {
+  const dt = Math.min(.04,(now-frame)/1000);
+  frame = now;
+  const amount = active === null ? 0 : Math.min(1,(now-started)/duration);
+  meter.value = amount;
+  updateMouth(now);
+  if (now < releaseUntil && now >= nextPuff) {
+    plume(now + 700 < releaseUntil ? 15 : 7);
+    nextPuff = now + 55;
+  }
+  ctx.clearRect(0,0,width,height);
+  drawHookah(amount);
+  for (let index = particles.length-1; index >= 0; --index) {
+    const p = particles[index];
+    p.age += dt;
+    p.life -= dt;
+    if (p.life <= 0) { particles.splice(index,1); continue; }
+    const fade = Math.min(1,.38+p.age*7) * (p.life / (p.age+p.life))**1.55;
+    const swirl = p.phase+p.age*4.4;
+    p.x += (p.vx+Math.sin(swirl)*29)*dt;
+    p.y += (p.vy+Math.cos(swirl)*14)*dt;
+    p.vx *= Math.exp(-.64*dt);
+    p.vy *= Math.exp(-.22*dt);
+    p.radius += (p.ring ? 43 : 38+p.age*6)*dt;
+    ctx.save();
+    ctx.translate(p.x,p.y);
+    if (p.ring) {
+      ctx.beginPath();
+      ctx.ellipse(0,0,p.radius,p.radius*.39,-.24+p.age*.23,0,Math.PI*2);
+      ctx.strokeStyle = 'rgba('+p.color+','+fade*.25+')';
+      ctx.lineWidth = 6+p.age*3;
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,248,239,'+fade*.23+')';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    } else {
+      ctx.rotate(p.phase+p.age*.65);
+      ctx.scale(1.34,.82+Math.min(.55,p.age*.25));
+      const mist = ctx.createRadialGradient(0,0,0,0,0,p.radius);
+      mist.addColorStop(0,'rgba('+p.color+','+fade*.38+')');
+      mist.addColorStop(.3,'rgba('+p.color+','+fade*.24+')');
+      mist.addColorStop(.68,'rgba('+p.color+','+fade*.075+')');
+      mist.addColorStop(1,'rgba('+p.color+',0)');
+      ellipse(0,0,p.radius,p.radius,mist);
+    }
+    ctx.restore();
+  }
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>
